@@ -21,9 +21,10 @@ Returns
 -------
 Optimal solution `p` and the objective value
 """
-function worstcase_l1(z::Vector{Float64}, p̄::Vector{Float64}, ξ::Float64)
-    (maximum(p̄) <= 1 + 1e-9 && minimum(p̄) >= -1e-9)  || "values must be between 0 and 1"
-    ξ >= 0 || "ξ must be nonnegative"
+function worstcase_l1(z::Vector{<:Real}, p̄::Vector{<:Real}, ξ::Real)
+    (maximum(p̄) ≤ 1 + 1e-9 && minimum(p̄) ≥ -1e-9)  ||
+        "values must be between 0 and 1"
+    ξ ≥ zero(ξ)|| "ξ must be nonnegative"
     (length(z) > 0 && length(z) == length(p̄)) ||
             "z's values needs to be same length as p̄'s values"
     
@@ -36,7 +37,7 @@ function worstcase_l1(z::Vector{Float64}, p̄::Vector{Float64}, ξ::Float64)
 
     ϵ = min(ξ / 2, 1 - p̄[k])
     out[k] += ϵ
-    i = size -1
+    i = size
 
     while ϵ > 0 && i > 0
         k = sorted_ind[i]
