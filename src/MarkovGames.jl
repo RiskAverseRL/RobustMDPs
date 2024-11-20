@@ -1,12 +1,13 @@
 using JuMP, LinearAlgebra, Distributions, StatsBase, Random
 
-function make_markov_game(num_states::Int64,num_actions_x::Vector{Int64},num_actions_y::Vector{Int64},r_lower::Float64,r_upper::Float64)
+function make_markov_game(num_states::Int64,num_actions_x::Vector{Int64},num_actions_y::Vector{Int64},r_lower::Float64,r_upper::Float64, η::Float64)
+    num_next = Int(round(η*num_states))
     P = [zeros(num_actions_y[s],num_actions_x[s],num_states) for s ∈ 1:num_states]
     R = [rand(Uniform(r_lower,r_upper),num_actions_y[s],num_actions_x[s]) for s ∈ 1:num_states]
     for s ∈ 1:num_states
         for a ∈ 1:num_actions_y[s]
-            for b ∈ 1:num_actions_x[s]
-                P[s][a,b,:] = normalize(rand(Exponential(1),num_states),1)
+            for b ∈ 1:num_actions_x[s]  
+                P[s][a,b,shuffle(1:num_states)[1:num_next]] = normalize(rand(Exponential(1),num_next),1)
             end
         end
     end
@@ -64,15 +65,11 @@ function R_π!(R_π,X,Y,R)
     end
 end
 
-function VI(P,R,γ,ϵ,env)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
-    v = zeros(length(R))
-    u = zeros(length(R))
+function VI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+    v = copy(v₀)
+    u = copy(v₀)
     Bv!(u,P,R,γ,env)
     while norm(u-v, Inf) > ϵ
         v .= u
@@ -83,15 +80,11 @@ function VI(P,R,γ,ϵ,env)
 end
 
 
-function PAI(P,R,γ,ϵ,env)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
-    v = zeros(length(R))
-    u = zeros(length(R))
+function PAI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+    v = copy(v₀)
+    u = copy(v₀)
     B!(u,X,Y,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
@@ -114,13 +107,9 @@ function Ψ(v,γ,env)
 end
 
 
-function Filar(P,R,γ,η,β,ϵ,env,v₀)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
+function Filar(P,R,γ,ϵ,env,η,β,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
     P_π = zeros(length(P),length(P))
@@ -142,13 +131,9 @@ function Filar(P,R,γ,η,β,ϵ,env,v₀)
     return (value = u, x = X, y = Y)
 end
 
-function Keiths(P,R,γ,ϵ,β,env,v₀)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
+function Keiths(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
     B!(u,X,Y,P,R,γ,env)
@@ -161,7 +146,7 @@ function Keiths(P,R,γ,ϵ,β,env,v₀)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         u .= (I - γ*P_π) \ R_π
-        while norm(u-v, Inf) > β*d
+        while norm(u-v, Inf) > γ*d
             v.= u
             B!(u,X,Y,P,R,γ,env)
         end
@@ -173,13 +158,13 @@ end
 
 Optimizes over values where `B u .≥ u`
 """
-function Mareks(P,R,γ,β,ϵ,env)
+function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
     # TODO: check if v₀ satisfies the LE condition?
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     
-    v = zeros(length(R))
-    u = zeros(length(R))
+    v = copy(v₀)
+    u = copy(v₀)
     for s ∈ eachindex(R)
         v[s] = -abs((1/(1-γ))*minimum(R[s]))
     end
@@ -218,13 +203,9 @@ function Mareks(P,R,γ,β,ϵ,env)
     return (value = u, x = X, y = Y)
 end
 
-function Winnicki(P,R,γ,ϵ,H,m,env,v₀)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
+function Winnicki(P,R,γ,ϵ,env,H,m,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
     B!(u,X,Y,P,R,γ,env)
@@ -244,15 +225,11 @@ function Winnicki(P,R,γ,ϵ,H,m,env,v₀)
     return (value = v, x = X, y = Y)
 end
 
-function HoffKarp(P,R,γ,ϵ,env)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
-    v = zeros(length(R))
-    u = zeros(length(R))
+function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+    v = copy(v₀)
+    u = copy(v₀)
     w = zeros(length(R))
     B!(u,X,Y,P,R,γ,env)
     P_π = zeros(length(P),length(P))
@@ -273,20 +250,16 @@ function HoffKarp(P,R,γ,ϵ,env)
     return (value = u, x = X, y = Y)
 end
 
-function PPI(P,R,γ,ϵ₁,ϵ₂,β,env)
-    X::Vector{Vector{Float64}} = []
-    Y::Vector{Vector{Float64}} = []
-    for s ∈ eachindex(R)
-        push!(X,zeros(size(R[s])[2]))
-        push!(Y,zeros(size(R[s])[1]))
-    end
-    v = zeros(length(R))
-    u = zeros(length(R))
+function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+    v = copy(v₀)
+    u = copy(v₀)
     w = zeros(length(R))
     B!(u,X,Y,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ₁
+    while norm(u-v, Inf) > ϵ
         v .= u
         B!(u,X,Y,P,R,γ,env)
         w .= u
