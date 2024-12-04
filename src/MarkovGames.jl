@@ -29,27 +29,28 @@ function matrix_game_solve(A, env)
     return (x = value.(x),y = -dual(s),u = value(u))
 end
 
-function Bv!(v,P,R,γ,env)
+
+function Bv!(vᵏ⁺¹,vᵏ,P,R,γ,env)
     for s ∈ eachindex(R)
-        v[s] = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*v[s2] for s2 ∈ eachindex(P)]),env).u
+        vᵏ⁺¹[s] = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]),env).u
     end
 end
 
-function B!(v,X,Y,P,R,γ,env) 
+function B!(vᵏ⁺¹,X,Y,vᵏ,P,R,γ,env) 
     for s ∈ eachindex(R)
-        out = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*v[s2] for s2 ∈ eachindex(P)]),env)
-        v[s] = out.u
+        out = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]),env)
+        vᵏ⁺¹[s] = out.u
         X[s] = out.x
         Y[s] = out.y
     end 
 end
 
-function Bμ!(v,X,Y,P,R,γ)
+function Bμ!(vᵏ⁺¹,X,Y,vᵏ,P,R,γ)
     for s ∈ eachindex(R)
         Y[s] = zeros(size(R[s])[1])
-        max = findmax((R[s]+γ*sum([P[s][:,:,s2]*v[s2] for s2 ∈ eachindex(P)]))*X[s])
+        max = findmax((R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]))*X[s])
         Y[s][max[2]] = 1
-        v[s] = max[1]
+        vᵏ⁺¹[s] = max[1]
     end
 end
 
@@ -70,12 +71,12 @@ function VI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
-    Bv!(u,P,R,γ,env)
+    Bv!(u,v,P,R,γ,env)
     while norm(u-v, Inf) > ϵ
         v .= u
-        Bv!(u,P,R,γ,env)
+        Bv!(u,v,P,R,γ,env)
     end
-    B!(v,X,Y,P,R,γ,env)
+    B!(u,X,Y,v,P,R,γ,env)
     return (value = v, x = X, y = Y)
 end
 
@@ -85,12 +86,12 @@ function PAI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
-    B!(u,X,Y,P,R,γ,env)
+    B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     while norm(u-v, Inf) > ϵ
         v .= u
-        B!(u,X,Y,P,R,γ,env)
+        B!(u,X,Y,v,P,R,γ,env)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         u .= (I - γ*P_π) \ R_π
@@ -98,12 +99,14 @@ function PAI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     return (value = v, x = X, y = Y)
 end
 
-function Ψ(v,γ,env)
-    loss_sum = 0
-    for s ∈ eachindex(v)
-        loss_sum += (matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*v[s2] for s2 ∈ eachindex(P)]),env).u - v[s])^2
-    end
-    return loss_sum
+function Ψ!(z,v,P,R,γ,env)
+    Bv!(z,v,P,R,γ,env)
+    return norm(z - v)
+end
+
+function Ψ∞!(z,v,P,R,γ,env)
+    Bv!(z,v,P,R,γ,env)
+    return norm(z - v, Inf)
 end
 
 
@@ -112,18 +115,19 @@ function Filar(P,R,γ,ϵ,env,η,β,v₀=zeros(length(R)))
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
+    z = Vector{Float64}(undef,length(v₀))
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     s = zeros(length(R))
-    while Ψ(u,γ,env) > ϵ
+    while Ψ!(z,u,P,R,γ,env) > ϵ
         v .= u
-        B!(u,X,Y,P,R,γ,env)
+        B!(u,X,Y,v,P,R,γ,env)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         s .= (I - γ*P_π) \ R_π - v
         α = 1
         δ = ((γ*P_π - I)'*(u-v))'*s
-        while Ψ(v+α*s,γ,env) - Ψ(v,γ,env) > η*α*δ
+        while Ψ!(z,v+α*s,P,R,γ,env) - Ψ!(z,v,P,R,γ,env) > η*α*δ
             α *= β
         end
         u .= v + α*s
@@ -136,19 +140,48 @@ function Keiths(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
-    B!(u,X,Y,P,R,γ,env)
+    w = copy(v₀)
+    B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     while norm(u-v, Inf) > ϵ
         v .= u
-        B!(u,X,Y,P,R,γ,env)
-        d = norm(u-v, Inf)
+        B!(u,X,Y,v,P,R,γ,env)
+        d = norm(u-v,Inf)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
-        u .= (I - γ*P_π) \ R_π
-        while norm(u-v, Inf) > γ*d
-            v.= u
-            B!(u,X,Y,P,R,γ,env)
+        w .= (I - γ*P_π) \ R_π
+        while Ψ∞!(u,w,P,R,γ,env) > d
+            w .= u
+        end
+    end
+    B!(u,X,Y,v,P,R,γ,env)
+    return (value = u, x = X, y = Y)
+end
+
+
+function Mareks2(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
+    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+    v = copy(v₀)
+    u = copy(v₀)
+    w = copy(v₀)
+    z = Vector{Float64}(undef,length(v₀))
+    B!(u,X,Y,v,P,R,γ,env)
+    P_π = zeros(length(P),length(P))
+    R_π = zeros(length(R))
+    while norm(u-v, Inf) > ϵ
+        v .= u
+        B!(u,X,Y,v,P,R,γ,env)
+        d = norm(u-v,Inf)
+        P_π!(P_π,X,Y,P)
+        R_π!(R_π,X,Y,R)
+        w .= (I - γ*P_π) \ R_π
+        if Ψ∞!(z,w,P,R,γ,env) > γ*d
+            v .= u
+            B!(u,X,Y,v,P,R,γ,env)
+        else
+            u .= w
         end
     end
     return (value = v, x = X, y = Y)
@@ -171,7 +204,7 @@ function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
     u .= v
 
     # Bellman operator
-    B!(u,X,Y,P,R,γ,env)
+    B!(u,X,Y,v,P,R,γ,env)
 
     # For policy evaluation
     P_π = zeros(length(P),length(P))
@@ -183,7 +216,7 @@ function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
     
     while norm(u-v, Inf) > ϵ
         v .= u
-        B!(u,X,Y,P,R,γ,env)
+        B!(u,X,Y,v,P,R,γ,env)
 
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
@@ -192,12 +225,12 @@ function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
         α = 1
         # TODO: should this be a u or v?
         Bu .= u
-        B!(Bu,X,Y,P,R,γ,env)
+        B!(Bu,X,Y,v,P,R,γ,env)
         while any(u .> Bu)
             α *= β
             u .= v + α*s
             Bu .= u
-            B!(Bu,X,Y,P,R,γ,env)
+            B!(Bu,X,Y,v,P,R,γ,env)
         end
     end
     return (value = u, x = X, y = Y)
@@ -208,13 +241,13 @@ function Winnicki(P,R,γ,ϵ,env,H,m,v₀=zeros(length(R)))
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
-    B!(u,X,Y,P,R,γ,env)
+    B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     while norm(u-v, Inf) > ϵ
         v .= u
         for i = 1:H
-            B!(u,X,Y,P,R,γ,env)
+            B!(u,X,Y,v,P,R,γ,env)
         end
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
@@ -231,20 +264,20 @@ function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     v = copy(v₀)
     u = copy(v₀)
     w = zeros(length(R))
-    B!(u,X,Y,P,R,γ,env)
+    B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     while norm(u-v, Inf) > ϵ
         v .= u
-        B!(u,X,Y,P,R,γ,env)
+        B!(u,X,Y,v,P,R,γ,env)
         w .= u
-        Bμ!(w,X,Y,P,R,γ)
+        Bμ!(w,X,Y,v,P,R,γ)
         while norm(w-u,Inf) > 0
             u .= w
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
             w .= (I - γ*P_π) \ R_π
-            Bμ!(w,X,Y,P,R,γ)
+            Bμ!(w,X,Y,v,P,R,γ)
         end 
     end
     return (value = u, x = X, y = Y)
@@ -256,20 +289,20 @@ function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
     v = copy(v₀)
     u = copy(v₀)
     w = zeros(length(R))
-    B!(u,X,Y,P,R,γ,env)
+    B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     while norm(u-v, Inf) > ϵ
         v .= u
-        B!(u,X,Y,P,R,γ,env)
+        B!(u,X,Y,v,P,R,γ,env)
         w .= u
-        Bμ!(w,X,Y,P,R,γ)
+        Bμ!(w,X,Y,v,P,R,γ)
         while norm(w-u,Inf) > ϵ₂
             u .= w
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
             w .= (I - γ*P_π) \ R_π
-            Bμ!(w,X,Y,P,R,γ)
+            Bμ!(w,X,Y,v,P,R,γ)
         end
         ϵ₂ *= β
     end
