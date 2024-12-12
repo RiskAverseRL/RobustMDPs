@@ -1,4 +1,4 @@
-using JuMP, LinearAlgebra, Distributions, StatsBase, Random
+using JuMP, LinearAlgebra, Distributions, StatsBase, Random, BenchmarkTools, Gurobi
 
 function make_markov_game(num_states::Int64,num_actions_x::Vector{Int64},num_actions_y::Vector{Int64},r_lower::Float64,r_upper::Float64, η::Float64)
     num_next = Int(round(η*num_states))
@@ -160,7 +160,7 @@ function Keiths(P,R,γ,ϵ,env,v₀=zeros(length(R)))
 end
 
 
-function Mareks2(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+function KeithMarek(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -310,6 +310,42 @@ function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
 end
 
 
+function time_algorithm(alg,P,R,γ,env)
+    if alg.name == "VI"
+        return @elapsed VI(P,R,γ,alg.ϵ,env)
+    elseif alg.name == "PAI"
+        return @elapsed PAI(P,R,γ,alg.ϵ,env)
+    elseif alg.name == "HK"
+        return @elapsed HoffKarp(P,R,γ,alg.ϵ,env)
+    elseif alg.name == "FT"
+        return @elapsed Filar(P,R,γ,alg.ϵ,env,alg.η,alg.β)
+    elseif alg.name == "M1"
+        return @elapsed Mareks(P,R,γ,alg.ϵ,env,alg.β)
+    elseif alg.name == "K1"
+        return @elapsed Keiths(P,R,γ,alg.ϵ,env)
+    elseif alg.name == "KM"
+        return @elapsed KeithMarek(P,R,γ,alg.ϵ,env)
+    elseif alg.name == "WIN"
+        return @elapsed Winnicki(P,R,γ,alg.ϵ,env,alg.H,alg.m)
+    elseif alg.name == "PPI"
+        return @elapsed PPI(P,R,γ,alg.ϵ,env,alg.ϵ₂,alg.β)
+    else error("algorithm name must be one of: \n
+                VI, PAI, HK, PPI, FT, M1, K1, KM, WIN")
+    end
+end
+
+function benchmark_run(state_nums::Vector{Int64}, algs, action_nums::Vector{Int64}, r_lower::Float64, r_upper::Float64, η::Number, γ::Number)
+    results = Matrix{Float64}(undef, length(algs), length(state_nums))
+    Env = Gurobi.Env()
+    Threads.@threads for (i,nₛ) ∈ enumerate(state_nums)
+        G = make_markov_game(nₛ,rand(action_nums,nₛ),rand(action_nums,nₛ),r_lower,r_upper,η)
+        for (j,alg) ∈ enumerate(algs)
+            results[j,i] = time_algorithm(alg,G.transition,G.rewards,γ,Env)
+        end
+    end
+    return results
+end
+
 #=
 Big Match:
 P = [[1;0 ;; 1;0 ;;; 0;0 ;; 0;1 ;;; 0;1 ;; 0;0],[0;;;1;;;0], [0;;;0;;;1]]
@@ -322,3 +358,5 @@ Filar Counter-Example:
 P = [[0;;0;;;0;;1;;;1;;0],[0;;;1;;;0],[0;;;0;;;1]]
 R = [[0 0],[-.5;;],[.5;;]]
 =#
+
+#benchmark_run(100*ones(20),[(name = "VI", ϵ = 1e-7),(name = "PAI", ϵ = 1e-7),(name = "HK", ϵ = 1e-7),(name = "FT", ϵ = 1e-7, η = .001, β = .5),(name = "M1", ϵ = 1e-7, β = .5),(name = "K1", ϵ = 1e-7),(name = "KM", ϵ = 1e-7),(name = "WIN", ϵ = 1e-7, H = 10, m = 100),(name = "PPI", ϵ = 1e-7, ϵ₂ = .1, β = .5)], [1,2,3,5,10], -3.0, 5.0, .2, .9)
