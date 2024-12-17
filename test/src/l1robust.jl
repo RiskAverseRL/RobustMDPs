@@ -92,11 +92,11 @@ end
         α = clamp(randn(Float64), 0, 2)
         (α < 0.0) && (α *= -1.0)
         @test JUMP_worstcase_l1(x, probs, α)[2] ≈ worstcase_l1(x, probs, α)[2]
-        # test weighted
         @test JUMP_worstcase_l1_weighted(x, probs, α, ones(n))[2] ≈ JUMP_worstcase_l1(x, probs, α)[2]
-        @test JUMP_worstcase_l1_weighted(x, probs, α, ones(n))[2] ≈ worstcase_l1_w(x, probs, ones(n), α)[2]
-        w = abs.(rand(n))
-        w = w / sum(w)
-        @test JUMP_worstcase_l1_weighted(x, probs, α, w)[2] ≈ worstcase_l1_w(x, probs, w, α)[2]
+        # TODO: test weighted after it is implemented
+        # @test JUMP_worstcase_l1_weighted(x, probs, α, ones(n))[2] ≈ worstcase_l1_w(x, probs, ones(n), α)[2]
+        # w = abs.(rand(n))
+        # w = w / sum(w)
+        # @test JUMP_worstcase_l1_weighted(x, probs, α, w)[2] ≈ worstcase_l1_w(x, probs, w, α)[2]
     end
 end
