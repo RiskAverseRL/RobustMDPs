@@ -18,6 +18,7 @@ end
 function matrix_game_solve(A, env)
     lpm = Model(()->(Gurobi.Optimizer(env)))
     set_silent(lpm)
+    set_optimizer_attribute(lpm, "Threads", 1)
     n = size(A)[2]
     @variable(lpm, u)
     @variable(lpm, x[1:n])
@@ -310,41 +311,7 @@ function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
 end
 
 
-function time_algorithm(alg,P,R,γ,env)
-    if alg.name == "VI"
-        return @elapsed VI(P,R,γ,alg.ϵ,env)
-    elseif alg.name == "PAI"
-        return @elapsed PAI(P,R,γ,alg.ϵ,env)
-    elseif alg.name == "HK"
-        return @elapsed HoffKarp(P,R,γ,alg.ϵ,env)
-    elseif alg.name == "FT"
-        return @elapsed Filar(P,R,γ,alg.ϵ,env,alg.η,alg.β)
-    elseif alg.name == "M1"
-        return @elapsed Mareks(P,R,γ,alg.ϵ,env,alg.β)
-    elseif alg.name == "K1"
-        return @elapsed Keiths(P,R,γ,alg.ϵ,env)
-    elseif alg.name == "KM"
-        return @elapsed KeithMarek(P,R,γ,alg.ϵ,env)
-    elseif alg.name == "WIN"
-        return @elapsed Winnicki(P,R,γ,alg.ϵ,env,alg.H,alg.m)
-    elseif alg.name == "PPI"
-        return @elapsed PPI(P,R,γ,alg.ϵ,env,alg.ϵ₂,alg.β)
-    else error("algorithm name must be one of: \n
-                VI, PAI, HK, PPI, FT, M1, K1, KM, WIN")
-    end
-end
 
-function benchmark_run(state_nums::Vector{Int64}, algs, action_nums::Vector{Int64}, r_lower::Float64, r_upper::Float64, η::Number, γ::Number)
-    results = Matrix{Float64}(undef, length(algs), length(state_nums))
-    Env = Gurobi.Env()
-    Threads.@threads for (i,nₛ) ∈ enumerate(state_nums)
-        G = make_markov_game(nₛ,rand(action_nums,nₛ),rand(action_nums,nₛ),r_lower,r_upper,η)
-        for (j,alg) ∈ enumerate(algs)
-            results[j,i] = time_algorithm(alg,G.transition,G.rewards,γ,Env)
-        end
-    end
-    return results
-end
 
 #=
 Big Match:
