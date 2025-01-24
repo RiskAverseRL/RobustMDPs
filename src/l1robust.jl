@@ -59,7 +59,9 @@ end
 function robust_bellman_solve(P̄ₛ,W,Z,κ, env)
     lpm = Model(()->(Gurobi.Optimizer(env)))
     set_silent(lpm)
-    set_optimizer_attribute(lpm, "Threads", 1)
+    set_attribute(lpm, "Threads", 1)
+    set_attribute(lpm, "BarConvTol", 1e-9)
+    set_attribute(lpm, "OptimalityTol", 1e-9)
     n = size(P̄ₛ)[2]
     m = size(P̄ₛ)[1]
     @variable(lpm, d[1:m])
@@ -120,8 +122,8 @@ end
 function Bμ!(vᵏ⁺¹,πᵏ,Pᵏ,vᵏ,P̄,R,W,γ,ξ,env)
     for s ∈ eachindex(R)
         Z = R[s] + γ*ones(size(R[s])[1])*vᵏ'
-        out = worst_prob_solve(P̄,W,Z,ξ,πᵏ[s],env)
-        vᵏ⁺¹[s] = [out.pₛ[a,:]*Z[a,:]' for a ∈ eachindex(R[s])]'*out.πₛ
+        out = worst_prob_solve(P̄[s],W[s],Z,ξ,πᵏ[s],env)
+        vᵏ⁺¹[s] = [out.pₛ[a,:]'*Z[a,:] for a ∈ 1:size(R[s])[1]]'*out.πₛ
         Pᵏ[s] = out.pₛ
     end
 end
@@ -141,7 +143,8 @@ end
 
 
 
-function VI(model::TabMDP,γ,ξ,W,ϵ,env,v₀=zeros(state_count(model)))
+function VI(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(model)))
+    start = time()
     πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
     Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
     P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
@@ -159,7 +162,7 @@ function VI(model::TabMDP,γ,ξ,W,ϵ,env,v₀=zeros(state_count(model)))
     v = copy(v₀)
     u = copy(v₀)
     Bv!(u,v,P̄,R,W,ξ,γ,env)
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         Bv!(u,v,P̄,R,W,ξ,γ,env)
     end
@@ -168,7 +171,8 @@ function VI(model::TabMDP,γ,ξ,W,ϵ,env,v₀=zeros(state_count(model)))
 end
 
 
-function PAI(model::TabMDP,γ,ξ,W,ϵ,env,v₀=zeros(state_count(model)))
+function PAI(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(model)))
+    start = time()
     πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
     Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
     P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
@@ -188,7 +192,7 @@ function PAI(model::TabMDP,γ,ξ,W,ϵ,env,v₀=zeros(state_count(model)))
     B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
     P_π = zeros(state_count(model),state_count(model))
     R_π = zeros(state_count(model))
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         P_π!(P_π,πᵏ,Pᵏ)
@@ -198,212 +202,300 @@ function PAI(model::TabMDP,γ,ξ,W,ϵ,env,v₀=zeros(state_count(model)))
     return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
-function Ψ!(z,v,P,R,γ,env)
-    Bv!(z,v,P,R,γ,env)
+function Ψ!(z,v,P̄,R,W,ξ,γ,env)
+    Bv!(z,v,P̄,R,W,ξ,γ,env)
     return norm(z - v)
 end
 
-function Ψ∞!(z,v,P,R,γ,env)
-    Bv!(z,v,P,R,γ,env)
+function Ψ∞!(z,v,P̄,R,W,ξ,γ,env)
+    Bv!(z,v,P̄,R,W,ξ,γ,env)
     return norm(z - v, Inf)
 end
 
 
-function Filar(P,R,γ,ϵ,env,η,β,v₀=zeros(length(R)))
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+function Filar(model,γ,ξ,W,ϵ,env,time_limit,η,β,v₀=zeros(state_count(model)))
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
+
     v = copy(v₀)
     u = copy(v₀)
     z = Vector{Float64}(undef,length(v₀))
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    s = zeros(length(R))
-    while Ψ!(z,u,P,R,γ,env) > ϵ
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    s = zeros(state_count(model))
+    while Ψ!(z,u,P̄,R,W,ξ,γ,env) > ϵ && time()-start < time_limit
         v .= u
-        B!(u,X,Y,v,P,R,γ,env)
-        P_π!(P_π,X,Y,P)
-        R_π!(R_π,X,Y,R)
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+        P_π!(P_π,πᵏ,Pᵏ)
+        R_π!(R_π,πᵏ,Pᵏ,R)
         s .= (I - γ*P_π) \ R_π - v
         α = 1
         δ = ((γ*P_π - I)'*(u-v))'*s
-        while Ψ!(z,v+α*s,P,R,γ,env) - Ψ!(z,v,P,R,γ,env) > η*α*δ
+        while Ψ!(z,v+α*s,P̄,R,W,ξ,γ,env) - Ψ!(z,v,P̄,R,W,ξ,γ,env) > η*α*δ && time()-start < time_limit
             α *= β
         end
         u .= v + α*s
     end
-    return (value = u, x = X, y = Y)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
-function Keiths(P,R,γ,ϵ,env,v₀=zeros(length(R)))
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+function Keiths(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(model)))
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
+
     v = copy(v₀)
     u = copy(v₀)
     w = copy(v₀)
-    B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         d = norm(u-v,Inf)
-        P_π!(P_π,X,Y,P)
-        R_π!(R_π,X,Y,R)
+        P_π!(P_π,πᵏ,Pᵏ)
+        R_π!(R_π,πᵏ,Pᵏ,R)
         w .= (I - γ*P_π) \ R_π
-        while Ψ∞!(u,w,P,R,γ,env) > d
+        while Ψ∞!(u,w,P̄,R,W,ξ,γ,env) > d && time()-start < time_limit
             w .= u
         end
     end
-    B!(u,X,Y,v,P,R,γ,env)
-    return (value = u, x = X, y = Y)
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
 
-function KeithMarek(P,R,γ,ϵ,env,v₀=zeros(length(R)))
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+function KeithMarek(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(model)))
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
+
     v = copy(v₀)
     u = copy(v₀)
     w = copy(v₀)
     z = Vector{Float64}(undef,length(v₀))
-    B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         d = norm(u-v,Inf)
-        P_π!(P_π,X,Y,P)
-        R_π!(R_π,X,Y,R)
+        P_π!(P_π,πᵏ,Pᵏ)
+        R_π!(R_π,πᵏ,Pᵏ,R)
         w .= (I - γ*P_π) \ R_π
-        if Ψ∞!(z,w,P,R,γ,env) > γ*d
+        if Ψ∞!(z,w,P̄,R,W,ξ,γ,env) > γ*d
             v .= u
-            B!(u,X,Y,v,P,R,γ,env)
+            B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         else
             u .= w
         end
     end
-    return (value = v, x = X, y = Y)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
 """
 
 Optimizes over values where `B u .≥ u`
 """
-function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
+function Mareks(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,β,v₀=zeros(state_count(model)))
     # TODO: check if v₀ satisfies the LE condition?
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
     
     v = copy(v₀)
     u = copy(v₀)
-    for s ∈ eachindex(R)
+    for s ∈ 1:state_count(model)
         v[s] = -abs((1/(1-γ))*minimum(R[s]))
     end
     u .= v
 
     # Bellman operator
-    B!(u,X,Y,v,P,R,γ,env)
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
 
     # For policy evaluation
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    s = zeros(length(R))
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    s = zeros(state_count(model))
 
     # A temporary variable to check monotonicity
-    Bu = zeros(length(R))
+    Bu = zeros(state_count(model))
     
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
 
-        P_π!(P_π,X,Y,P)
-        R_π!(R_π,X,Y,R)
+        P_π!(P_π,πᵏ,Pᵏ)
+        R_π!(R_π,πᵏ,Pᵏ,R)
 
         s .= (I - γ*P_π) \ R_π - v
         α = 1
         # TODO: should this be a u or v?
         Bu .= u
-        B!(Bu,X,Y,v,P,R,γ,env)
-        while any(u .> Bu)
+        B!(Bu,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+        while any(u .> Bu) && time()-start < time_limit
             α *= β
             u .= v + α*s
             Bu .= u
-            B!(Bu,X,Y,v,P,R,γ,env)
+            B!(Bu,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         end
     end
-    return (value = u, x = X, y = Y)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
-function Winnicki(P,R,γ,ϵ,env,H,m,v₀=zeros(length(R)))
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+function Winnicki(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,H,m,v₀=zeros(state_count(model)))
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
+
     v = copy(v₀)
     u = copy(v₀)
-    B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         for i = 1:H
-            B!(u,X,Y,v,P,R,γ,env)
+            B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         end
-        P_π!(P_π,X,Y,P)
-        R_π!(R_π,X,Y,R)
+        P_π!(P_π,πᵏ,Pᵏ)
+        R_π!(R_π,πᵏ,Pᵏ,R)
         for i = 1:m
             u .= R_π + γ*P_π*u
         end
     end
-    return (value = v, x = X, y = Y)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
-function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+function HoffKarp(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(model)))
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
+
     v = copy(v₀)
     u = copy(v₀)
-    w = zeros(length(R))
-    B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    w = zeros(state_count(model))
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
-        B!(u,X,Y,v,P,R,γ,env)
-        w .= u
-        Bμ!(w,X,Y,v,P,R,γ)
-        while norm(w-u,Inf) > 0
-            u .= w
-            P_π!(P_π,X,Y,P)
-            R_π!(R_π,X,Y,R)
-            w .= (I - γ*P_π) \ R_π
-            Bμ!(w,X,Y,v,P,R,γ)
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+        Bμ!(w,πᵏ,Pᵏ,u,P̄,R,W,γ,ξ,env)
+        while norm(w-u,Inf) > 1e-6 && time()-start < time_limit
+            P_π!(P_π,πᵏ,Pᵏ)
+            R_π!(R_π,πᵏ,Pᵏ,R)
+            u .= (I - γ*P_π) \ R_π
+            Bμ!(w,πᵏ,Pᵏ,u,P̄,R,W,γ,ξ,env)
         end 
     end
-    return (value = u, x = X, y = Y)
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
 
-function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
-    X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
-    Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
+function PPI(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,β,ϵ₂,v₀=zeros(state_count(model)))
+    start = time()
+    πᵏ = [zeros(action_count(model,s)) for s ∈ 1:state_count(model)]
+    Pᵏ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    P̄ = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    R = [zeros(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
+    for s ∈ 1:state_count(model)
+        for a ∈ 1:action_count(model,s)
+            next = transition(model,s,a)
+            for (sⁿ,p,r) ∈ next
+                P̄[s][a,sⁿ] += p
+                R[s][a,sⁿ] += r
+            end
+        end
+    end
+
     v = copy(v₀)
     u = copy(v₀)
-    w = zeros(length(R))
-    B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    w = zeros(state_count(model))
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    P_π = zeros(state_count(model),state_count(model))
+    R_π = zeros(state_count(model))
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
-        B!(u,X,Y,v,P,R,γ,env)
-        w .= u
-        Bμ!(w,X,Y,v,P,R,γ)
-        while norm(w-u,Inf) > ϵ₂
-            u .= w
-            P_π!(P_π,X,Y,P)
-            R_π!(R_π,X,Y,R)
-            w .= (I - γ*P_π) \ R_π
-            Bμ!(w,X,Y,v,P,R,γ)
-        end
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+        Bμ!(w,πᵏ,Pᵏ,u,P̄,R,W,γ,ξ,env)
+        while norm(w-u,Inf) > ϵ₂ && time()-start < time_limit
+            P_π!(P_π,πᵏ,Pᵏ)
+            R_π!(R_π,πᵏ,Pᵏ,R)
+            u .= (I - γ*P_π) \ R_π
+            Bμ!(w,πᵏ,Pᵏ,u,P̄,R,W,γ,ξ,env)
+        end 
         ϵ₂ *= β
     end
-    return (value = u, x = X, y = Y)
+    B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+    return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end

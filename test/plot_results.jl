@@ -1,10 +1,10 @@
 using Plots, CSV, DataFrames, Statistics
 
 
-algorithms = ["VI", "PAI", "HK", "FT", "M1", "K1","KM", "WIN", "PPI"]
+algorithms = ["VI", "PAI", "HK", "M1", "K1","KM", "WIN", "PPI"]
 algorithms = ["PAI", "K1", "KM"]
 
-results = DataFrame(CSV.File("Garnet_extended3.csv"))
+results = DataFrame(CSV.File("Inventory_fast.csv"))
 
 mean_times = combine(groupby(results, [:state_number,:algorithm,:γ]), :time => mean)
 plot1 = plot(title = "mean, γ = .9")
@@ -66,4 +66,4 @@ for a ∈ algorithms
     plot!(cur.state_number,cur.time_maximum, label = a)
 end
 
-plot(plot1,plot2,plot3,plot4,plot5,plot6,plot7,plot8,plot9, layout = (3,3), size = (1600,900), ylim = (0,50), legend=:topleft) #, xlabel= "Number of States", ylabel = "runtime in seconds")
+plot(plot1,plot2,plot3,plot4,plot5,plot6,plot7,plot8,plot9, layout = (3,3), size = (1600,900), ylim = (0,200), legend=:topleft) #, xlabel= "Number of States", ylabel = "runtime in seconds")

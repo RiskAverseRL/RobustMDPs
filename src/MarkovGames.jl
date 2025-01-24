@@ -271,16 +271,16 @@ function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     while norm(u-v, Inf) > ϵ
         v .= u
         B!(u,X,Y,v,P,R,γ,env)
-        w .= u
-        Bμ!(w,X,Y,v,P,R,γ)
+        Bμ!(w,X,Y,u,P,R,γ)
         while norm(w-u,Inf) > 0
             u .= w
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
             w .= (I - γ*P_π) \ R_π
-            Bμ!(w,X,Y,v,P,R,γ)
+            Bμ!(w,X,Y,u,P,R,γ)
         end 
     end
+    B!(u,X,Y,v,P,R,γ,env)
     return (value = u, x = X, y = Y)
 end
 
@@ -296,17 +296,17 @@ function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
     while norm(u-v, Inf) > ϵ
         v .= u
         B!(u,X,Y,v,P,R,γ,env)
-        w .= u
-        Bμ!(w,X,Y,v,P,R,γ)
+        Bμ!(w,X,Y,u,P,R,γ)
         while norm(w-u,Inf) > ϵ₂
             u .= w
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
             w .= (I - γ*P_π) \ R_π
-            Bμ!(w,X,Y,v,P,R,γ)
+            Bμ!(w,X,Y,u,P,R,γ)
         end
         ϵ₂ *= β
     end
+    B!(u,X,Y,v,P,R,γ,env)
     return (value = u, x = X, y = Y)
 end
 
