@@ -118,7 +118,7 @@ function benchmark_run_ruin(algs ,state_nums::Vector{Int64}, Γ::Vector{Float64}
 end
 
 #= algorithms = [(name = "VI",), (name = "PAI",), (name = "HK",), (name = "FT", η = 1e-3, β = .5),
-              (name = "M1", β = .5), (name = "K1",), (name = "KM",), (name = "WIN", H = 10, m = 100),
+              (name = "K1",), (name = "KM",), (name = "WIN", H = 10, m = 100),
               (name = "PPI", ϵ₂ = .1, β = .5)]  =#
 #= algorithms = [(name = "PAI",), (name = "K1",), (name = "KM",)]  =#
 

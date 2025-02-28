@@ -37,6 +37,14 @@ function Bv!(vᵏ⁺¹,vᵏ,P,R,γ,env)
     end
 end
 
+function Bv(vᵏ,P,R,γ,env)
+    u = zeros(length(R))
+    for s ∈ eachindex(R)
+        u[s] = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]),env).u
+    end
+    return u
+end
+
 function B!(vᵏ⁺¹,X,Y,vᵏ,P,R,γ,env) 
     for s ∈ eachindex(R)
         out = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]),env)
@@ -67,13 +75,14 @@ function R_π!(R_π,X,Y,R)
     end
 end
 
-function VI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+function VI(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
     Bv!(u,v,P,R,γ,env)
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         Bv!(u,v,P,R,γ,env)
     end
@@ -82,7 +91,8 @@ function VI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
 end
 
 
-function PAI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+function PAI(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -90,12 +100,11 @@ function PAI(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
-        v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
-        u .= (I - γ*P_π) \ R_π
+        v .= (I - γ*P_π) \ R_π
+        B!(u,X,Y,v,P,R,γ,env)
     end
     return (value = v, x = X, y = Y)
 end
@@ -111,7 +120,8 @@ function Ψ∞!(z,v,P,R,γ,env)
 end
 
 
-function Filar(P,R,γ,ϵ,env,η,β,v₀=zeros(length(R)))
+function Filar(P,R,γ,ϵ,env,time_limit,η,β,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -120,15 +130,15 @@ function Filar(P,R,γ,ϵ,env,η,β,v₀=zeros(length(R)))
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
     s = zeros(length(R))
-    while Ψ!(z,u,P,R,γ,env) > ϵ
+    while Ψ!(z,u,P,R,γ,env) > ϵ && time()-start < time_limit
         v .= u
         B!(u,X,Y,v,P,R,γ,env)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         s .= (I - γ*P_π) \ R_π - v
-        α = 1
+        α = 1.
         δ = ((γ*P_π - I)'*(u-v))'*s
-        while Ψ!(z,v+α*s,P,R,γ,env) - Ψ!(z,v,P,R,γ,env) > η*α*δ
+        while Ψ!(z,v+α*s,P,R,γ,env) - Ψ!(z,v,P,R,γ,env) > η*α*δ && time()-start < time_limit
             α *= β
         end
         u .= v + α*s
@@ -136,32 +146,34 @@ function Filar(P,R,γ,ϵ,env,η,β,v₀=zeros(length(R)))
     return (value = u, x = X, y = Y)
 end
 
-function Keiths(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+function Keiths(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
     u = copy(v₀)
-    w = copy(v₀)
     B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
-        v .= u
-        B!(u,X,Y,v,P,R,γ,env)
-        d = norm(u-v,Inf)
+    d = norm(u-v,Inf)
+    while d > ϵ && time()-start < time_limit
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
-        w .= (I - γ*P_π) \ R_π
-        while Ψ∞!(u,w,P,R,γ,env) > d
-            w .= u
+        v .= (I - γ*P_π) \ R_π
+        B!(u,X,Y,v,P,R,γ,env)
+        while norm(u-v, Inf) > γ*d && time()-start < time_limit
+            v .= u
+            B!(u,X,Y,v,P,R,γ,env)
         end
+        d = norm(u-v,Inf)
     end
     B!(u,X,Y,v,P,R,γ,env)
     return (value = u, x = X, y = Y)
 end
 
 
-function KeithMarek(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+function KeithMarek(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -171,19 +183,20 @@ function KeithMarek(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
-        v .= u
-        B!(u,X,Y,v,P,R,γ,env)
-        d = norm(u-v,Inf)
+    d = norm(u-v, Inf)
+    while d > ϵ && time()-start < time_limit
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         w .= (I - γ*P_π) \ R_π
-        if Ψ∞!(z,w,P,R,γ,env) > γ*d
+        B!(z,X,Y,w,P,R,γ,env)
+        if norm(z-w,Inf) > γ*d
             v .= u
             B!(u,X,Y,v,P,R,γ,env)
         else
-            u .= w
+            v .= w
+            u .= z
         end
+        d = norm(u-v, Inf)
     end
     return (value = v, x = X, y = Y)
 end
@@ -192,7 +205,8 @@ end
 
 Optimizes over values where `B u .≥ u`
 """
-function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
+function Mareks(P,R,γ,ϵ,env,time_limit,β,v₀=zeros(length(R)))
+    start = time()
     # TODO: check if v₀ satisfies the LE condition?
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
@@ -215,7 +229,7 @@ function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
     # A temporary variable to check monotonicity
     Bu = zeros(length(R))
     
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         B!(u,X,Y,v,P,R,γ,env)
 
@@ -227,7 +241,7 @@ function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
         # TODO: should this be a u or v?
         Bu .= u
         B!(Bu,X,Y,v,P,R,γ,env)
-        while any(u .> Bu)
+        while any(u .> Bu) && time()-start < time_limit
             α *= β
             u .= v + α*s
             Bu .= u
@@ -237,7 +251,8 @@ function Mareks(P,R,γ,ϵ,env,β,v₀=zeros(length(R)))
     return (value = u, x = X, y = Y)
 end
 
-function Winnicki(P,R,γ,ϵ,env,H,m,v₀=zeros(length(R)))
+function Winnicki(P,R,γ,ϵ,env,time_limit,H,m,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -245,7 +260,7 @@ function Winnicki(P,R,γ,ϵ,env,H,m,v₀=zeros(length(R)))
     B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         for i = 1:H
             B!(u,X,Y,v,P,R,γ,env)
@@ -259,7 +274,8 @@ function Winnicki(P,R,γ,ϵ,env,H,m,v₀=zeros(length(R)))
     return (value = v, x = X, y = Y)
 end
 
-function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
+function HoffKarp(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -268,15 +284,14 @@ function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         B!(u,X,Y,v,P,R,γ,env)
         Bμ!(w,X,Y,u,P,R,γ)
-        while norm(w-u,Inf) > 0
-            u .= w
+        while norm(w-u,Inf) > 1e-6 && time()-start < time_limit
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
-            w .= (I - γ*P_π) \ R_π
+            u .= (I - γ*P_π) \ R_π
             Bμ!(w,X,Y,u,P,R,γ)
         end 
     end
@@ -284,7 +299,8 @@ function HoffKarp(P,R,γ,ϵ,env,v₀=zeros(length(R)))
     return (value = u, x = X, y = Y)
 end
 
-function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
+function PPI(P,R,γ,ϵ,env,time_limit,ϵ₂,β,v₀=zeros(length(R)))
+    start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
@@ -293,15 +309,14 @@ function PPI(P,R,γ,ϵ,env,ϵ₂,β,v₀=zeros(length(R)))
     B!(u,X,Y,v,P,R,γ,env)
     P_π = zeros(length(P),length(P))
     R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ
+    while norm(u-v, Inf) > ϵ && time()-start < time_limit
         v .= u
         B!(u,X,Y,v,P,R,γ,env)
         Bμ!(w,X,Y,u,P,R,γ)
-        while norm(w-u,Inf) > ϵ₂
-            u .= w
+        while norm(w-u,Inf) > ϵ₂ && time()-start < time_limit
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
-            w .= (I - γ*P_π) \ R_π
+            u .= (I - γ*P_π) \ R_π
             Bμ!(w,X,Y,u,P,R,γ)
         end
         ϵ₂ *= β

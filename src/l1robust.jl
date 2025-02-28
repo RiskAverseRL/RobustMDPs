@@ -193,11 +193,10 @@ function PAI(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(mode
     P_π = zeros(state_count(model),state_count(model))
     R_π = zeros(state_count(model))
     while norm(u-v, Inf) > ϵ && time()-start < time_limit
-        v .= u
-        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         P_π!(P_π,πᵏ,Pᵏ)
         R_π!(R_π,πᵏ,Pᵏ,R)
-        u .= (I - γ*P_π) \ R_π
+        v .= (I - γ*P_π) \ R_π
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
     end
     return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
@@ -241,7 +240,7 @@ function Filar(model,γ,ξ,W,ϵ,env,time_limit,η,β,v₀=zeros(state_count(mode
         P_π!(P_π,πᵏ,Pᵏ)
         R_π!(R_π,πᵏ,Pᵏ,R)
         s .= (I - γ*P_π) \ R_π - v
-        α = 1
+        α = 1.
         δ = ((γ*P_π - I)'*(u-v))'*s
         while Ψ!(z,v+α*s,P̄,R,W,ξ,γ,env) - Ψ!(z,v,P̄,R,W,ξ,γ,env) > η*α*δ && time()-start < time_limit
             α *= β
@@ -269,20 +268,20 @@ function Keiths(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_count(m
 
     v = copy(v₀)
     u = copy(v₀)
-    w = copy(v₀)
     B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
     P_π = zeros(state_count(model),state_count(model))
     R_π = zeros(state_count(model))
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
-        v .= u
-        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
-        d = norm(u-v,Inf)
+    d = norm(u-v,Inf)
+    while d > ϵ && time()-start < time_limit
         P_π!(P_π,πᵏ,Pᵏ)
         R_π!(R_π,πᵏ,Pᵏ,R)
-        w .= (I - γ*P_π) \ R_π
-        while Ψ∞!(u,w,P̄,R,W,ξ,γ,env) > d && time()-start < time_limit
-            w .= u
+        v .= (I - γ*P_π) \ R_π
+        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
+        while norm(u-v,Inf) > γ*d && time()-start < time_limit
+            v .= u
+            B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         end
+        d = norm(u-v,Inf)
     end
     B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
     return (value = v, policy = πᵏ, worst_transition = Pᵏ)
@@ -312,19 +311,20 @@ function KeithMarek(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,v₀=zeros(state_cou
     B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
     P_π = zeros(state_count(model),state_count(model))
     R_π = zeros(state_count(model))
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
-        v .= u
-        B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
-        d = norm(u-v,Inf)
+    d = norm(u-v,Inf)
+    while d > ϵ && time()-start < time_limit
         P_π!(P_π,πᵏ,Pᵏ)
         R_π!(R_π,πᵏ,Pᵏ,R)
         w .= (I - γ*P_π) \ R_π
-        if Ψ∞!(z,w,P̄,R,W,ξ,γ,env) > γ*d
+        B!(z,πᵏ,Pᵏ,w,P̄,R,W,γ,ξ,env)
+        if norm(z-w,Inf) > γ*d
             v .= u
             B!(u,πᵏ,Pᵏ,v,P̄,R,W,γ,ξ,env)
         else
-            u .= w
+            v .= w
+            u .= z
         end
+        d = norm(u-v,Inf)
     end
     return (value = v, policy = πᵏ, worst_transition = Pᵏ)
 end
