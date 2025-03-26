@@ -1,18 +1,5 @@
 using JuMP, LinearAlgebra, Distributions, StatsBase, Random, BenchmarkTools, Gurobi
 
-function make_markov_game(num_states::Int64,num_actions_x::Vector{Int64},num_actions_y::Vector{Int64},r_lower::Float64,r_upper::Float64, η::Float64)
-    num_next = Int(round(η*num_states))
-    P = [zeros(num_actions_y[s],num_actions_x[s],num_states) for s ∈ 1:num_states]
-    R = [rand(Uniform(r_lower,r_upper),num_actions_y[s],num_actions_x[s]) for s ∈ 1:num_states]
-    for s ∈ 1:num_states
-        for a ∈ 1:num_actions_y[s]
-            for b ∈ 1:num_actions_x[s]  
-                P[s][a,b,shuffle(1:num_states)[1:num_next]] = normalize(rand(Exponential(1),num_next),1)
-            end
-        end
-    end
-    return (transition = P, rewards = R)
-end
 
 
 function matrix_game_solve(A, env)
@@ -37,6 +24,7 @@ function Bv!(vᵏ⁺¹,vᵏ,P,R,γ,env)
     end
 end
 
+
 function Bv(vᵏ,P,R,γ,env)
     u = zeros(length(R))
     for s ∈ eachindex(R)
@@ -49,14 +37,14 @@ function B!(vᵏ⁺¹,X,Y,vᵏ,P,R,γ,env)
     for s ∈ eachindex(R)
         out = matrix_game_solve(R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]),env)
         vᵏ⁺¹[s] = out.u
-        X[s] = out.x
-        Y[s] = out.y
+        X[s] .= out.x
+        Y[s] .= out.y
     end 
 end
 
 function Bμ!(vᵏ⁺¹,X,Y,vᵏ,P,R,γ)
     for s ∈ eachindex(R)
-        Y[s] = zeros(size(R[s])[1])
+        Y[s] .= zeros(size(R[s])[1])
         max = findmax((R[s]+γ*sum([P[s][:,:,s2]*vᵏ[s2] for s2 ∈ eachindex(P)]))*X[s])
         Y[s][max[2]] = 1
         vᵏ⁺¹[s] = max[1]
@@ -65,7 +53,7 @@ end
 
 function P_π!(P_π,X,Y,P)
     for s ∈ eachindex(P)
-        P_π[s,:] = [Y[s]'*P[s][:,:,s_next]*X[s] for s_next ∈ eachindex(P)]
+        P_π[s,:] .= [Y[s]'*P[s][:,:,s_next]*X[s] for s_next ∈ eachindex(P)]
     end
 end
 
@@ -76,87 +64,109 @@ function R_π!(R_π,X,Y,R)
 end
 
 function VI(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
+    u = Vector{Float64}(undef,length(v₀))
     Bv!(u,v,P,R,γ,env)
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
+    err = norm(u-v,Inf)
+    while err > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,err)
         v .= u
         Bv!(u,v,P,R,γ,env)
+        err = norm(u-v,Inf)
     end
     B!(u,X,Y,v,P,R,γ,env)
-    return (value = v, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,err)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 
 function PAI(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
+    u = Vector{Float64}(undef,length(v₀))
     B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
+    err = norm(u-v,Inf)
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
+    while err > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,err)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         v .= (I - γ*P_π) \ R_π
         B!(u,X,Y,v,P,R,γ,env)
+        err = norm(u-v,Inf)
     end
-    return (value = v, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,err)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
-function Ψ!(z,v,P,R,γ,env)
-    Bv!(z,v,P,R,γ,env)
-    return norm(z - v)
-end
-
-function Ψ∞!(z,v,P,R,γ,env)
-    Bv!(z,v,P,R,γ,env)
-    return norm(z - v, Inf)
+function Ψ!(z,X,Y,v,P,R,γ,env)
+    B!(z,X,Y,v,P,R,γ,env)
+    sum((z-v).^2)
 end
 
 
 function Filar(P,R,γ,ϵ,env,time_limit,η,β,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
-    z = Vector{Float64}(undef,length(v₀))
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
+    u = Vector{Float64}(undef,length(v₀))
+    B!(u,X,Y,v,P,R,γ,env)
+    err = norm(u-v,Inf)
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
     s = zeros(length(R))
-    while Ψ!(z,u,P,R,γ,env) > ϵ && time()-start < time_limit
-        v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+    while err > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,err)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         s .= (I - γ*P_π) \ R_π - v
         α = 1.
         δ = ((γ*P_π - I)'*(u-v))'*s
-        while Ψ!(z,v+α*s,P,R,γ,env) - Ψ!(z,v,P,R,γ,env) > η*α*δ && time()-start < time_limit
+        J = sum((u-v).^2)
+        while Ψ!(u,X,Y,v+α*s,P,R,γ,env) - J > η*α*δ && time()-start < time_limit
             α *= β
         end
-        u .= v + α*s
+        v .= v + α*s
+        err = norm(u-v,Inf)
     end
-    return (value = u, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,err)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 function Keiths(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
+    u = Vector{Float64}(undef,length(v₀))
     B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
     d = norm(u-v,Inf)
     while d > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,d)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         v .= (I - γ*P_π) \ R_π
@@ -167,24 +177,29 @@ function Keiths(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
         end
         d = norm(u-v,Inf)
     end
-    B!(u,X,Y,v,P,R,γ,env)
-    return (value = u, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,d)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 
-function KeithMarek(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+function RCPI(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
-    w = copy(v₀)
+    u = Vector{Float64}(undef,length(v₀))
+    w = Vector{Float64}(undef,length(v₀))
     z = Vector{Float64}(undef,length(v₀))
     B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
     d = norm(u-v, Inf)
     while d > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,d)
         P_π!(P_π,X,Y,P)
         R_π!(R_π,X,Y,R)
         w .= (I - γ*P_π) \ R_π
@@ -198,7 +213,9 @@ function KeithMarek(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
         end
         d = norm(u-v, Inf)
     end
-    return (value = v, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,d)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 """
@@ -248,21 +265,26 @@ function Mareks(P,R,γ,ϵ,env,time_limit,β,v₀=zeros(length(R)))
             B!(Bu,X,Y,v,P,R,γ,env)
         end
     end
-    return (value = u, x = X, y = Y)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 function Winnicki(P,R,γ,ϵ,env,time_limit,H,m,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
+    u = Vector{Float64}(undef,length(v₀))
     B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
-        v .= u
-        for i = 1:H
+    err = norm(u-v,Inf)
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
+    while err > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,err)
+        for i = 2:H
+            v .= u
             B!(u,X,Y,v,P,R,γ,env)
         end
         P_π!(P_π,X,Y,P)
@@ -270,48 +292,63 @@ function Winnicki(P,R,γ,ϵ,env,time_limit,H,m,v₀=zeros(length(R)))
         for i = 1:m
             u .= R_π + γ*P_π*u
         end
+        v .= u
+        B!(u,X,Y,v,P,R,γ,env)
+        err = norm(u-v,Inf)
     end
-    return (value = v, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,err)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 function HoffKarp(P,R,γ,ϵ,env,time_limit,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
-    w = zeros(length(R))
+    u = Vector{Float64}(undef,length(v₀))
+    w = Vector{Float64}(undef,length(v₀))
     B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
-        v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+    err = norm(u-v,Inf)
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
+    while err > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,err)
         Bμ!(w,X,Y,u,P,R,γ)
         while norm(w-u,Inf) > 1e-6 && time()-start < time_limit
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
             u .= (I - γ*P_π) \ R_π
             Bμ!(w,X,Y,u,P,R,γ)
-        end 
+        end
+        v .= u
+        B!(u,X,Y,v,P,R,γ,env)
+        err = norm(u-v,Inf) 
     end
-    B!(u,X,Y,v,P,R,γ,env)
-    return (value = u, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,err)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 function PPI(P,R,γ,ϵ,env,time_limit,ϵ₂,β,v₀=zeros(length(R)))
+    times = Vector{Float64}(undef,0)
+    errors = Vector{Float64}(undef,0)
     start = time()
     X = [zeros(size(R[s])[2]) for s ∈ eachindex(R)]
     Y = [zeros(size(R[s])[1]) for s ∈ eachindex(R)]
     v = copy(v₀)
-    u = copy(v₀)
-    w = zeros(length(R))
+    u = Vector{Float64}(undef,length(v₀))
+    w = Vector{Float64}(undef,length(v₀))
     B!(u,X,Y,v,P,R,γ,env)
-    P_π = zeros(length(P),length(P))
-    R_π = zeros(length(R))
-    while norm(u-v, Inf) > ϵ && time()-start < time_limit
-        v .= u
-        B!(u,X,Y,v,P,R,γ,env)
+    err = norm(u-v,Inf)
+    P_π = Matrix{Float64}(undef, (length(P),length(P)))
+    R_π = Vector{Float64}(undef, length(R))
+    while err > ϵ && time()-start < time_limit
+        append!(times,time()-start)
+        append!(errors,err)
         Bμ!(w,X,Y,u,P,R,γ)
         while norm(w-u,Inf) > ϵ₂ && time()-start < time_limit
             P_π!(P_π,X,Y,P)
@@ -320,9 +357,13 @@ function PPI(P,R,γ,ϵ,env,time_limit,ϵ₂,β,v₀=zeros(length(R)))
             Bμ!(w,X,Y,u,P,R,γ)
         end
         ϵ₂ *= β
+        v .= u
+        B!(u,X,Y,v,P,R,γ,env)
+        err = norm(u-v,Inf)
     end
-    B!(u,X,Y,v,P,R,γ,env)
-    return (value = u, x = X, y = Y)
+    append!(times,time()-start)
+    append!(errors,err)
+    return (value = v, x = X, y = Y, times = times, errors = errors)
 end
 
 
@@ -342,3 +383,5 @@ R = [[0 0],[-.5;;],[.5;;]]
 =#
 
 #benchmark_run(100*ones(20),[(name = "VI", ϵ = 1e-7),(name = "PAI", ϵ = 1e-7),(name = "HK", ϵ = 1e-7),(name = "FT", ϵ = 1e-7, η = .001, β = .5),(name = "M1", ϵ = 1e-7, β = .5),(name = "K1", ϵ = 1e-7),(name = "KM", ϵ = 1e-7),(name = "WIN", ϵ = 1e-7, H = 10, m = 100),(name = "PPI", ϵ = 1e-7, ϵ₂ = .1, β = .5)], [1,2,3,5,10], -3.0, 5.0, .2, .9)
+
+
