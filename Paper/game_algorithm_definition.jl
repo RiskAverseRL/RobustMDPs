@@ -350,7 +350,7 @@ function PPI(P,R,γ,ϵ,env,time_limit,ϵ₂,β,v₀=zeros(length(R)))
         append!(times,time()-start)
         append!(errors,err)
         Bμ!(w,X,Y,u,P,R,γ)
-        while norm(w-u,Inf) > ϵ₂ && time()-start < time_limit
+        while norm(w-u,Inf) > ϵ₂ + 1e-6 && time()-start < time_limit
             P_π!(P_π,X,Y,P)
             R_π!(R_π,X,Y,R)
             u .= (I - γ*P_π) \ R_π

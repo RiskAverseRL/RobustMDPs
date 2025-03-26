@@ -481,7 +481,7 @@ function PPI(model::TabMDP,γ,ξ,W,ϵ,env,time_limit,β,ϵ₂,v₀=zeros(state_c
         append!(times,time()-start)
         append!(errors,err)
         Bμ!(w,πᵏ,Pᵏ,u,P̄,R,W,γ,ξ,env)
-        while norm(w-u,Inf) > ϵ₂ && time()-start < time_limit
+        while norm(w-u,Inf) > ϵ₂ + 1e-6 && time()-start < time_limit
             P_π!(P_π,πᵏ,Pᵏ)
             R_π!(R_π,πᵏ,Pᵏ,R)
             u .= (I - γ*P_π) \ R_π
