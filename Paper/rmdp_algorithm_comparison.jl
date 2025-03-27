@@ -130,6 +130,6 @@ end
 #= algorithms = [(name = "VI",), (name = "PAI",), (name = "HK",), (name = "FT", η = 1e-3, β = .5),
               (name = "KB",), (name = "RCPI",), (name = "WIN", H = 2, m = 4),
               (name = "PPI", ϵ₂ = .1, β = .5)]  =#
-#= algorithms = [(name = "PAI",), (name = "K1",), (name = "KM",)]  =#
+#= algorithms = [(name = "PAI",), (name = "KB",), (name = "RCPI",)]  =#
 
 #[ones(action_count(model,s),state_count(model)) for s ∈ 1:state_count(model)]
