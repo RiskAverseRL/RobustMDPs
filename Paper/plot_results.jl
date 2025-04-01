@@ -1,21 +1,25 @@
 using Plots, CSV, DataFrames, Statistics, Distributions, Arrow
 
 
-algorithms = [#= "VI", =# "PAI", "FT", "HK", "KB", "RCPI", #= "WIN", =# "PPI"]
+algorithms = ["VI", "PAI", "FT", "HK", "KB", "RCPI", "WIN", "PPI"]
 #linetypes = [:solid, :dash, :dot]
 #= algorithms = ["PAI", "KM"]
 legend_labels = ["PAI", "RCPI"] =#
 
-results = DataFrame(Arrow.Table("Paper/new test data/test3.arrow"))
+results = copy(DataFrame(Arrow.Table("Paper/new test data/inv_fast.arrow")))
+alg_results = groupby(results, :algorithm)
 
-p = plot(title = "Algorithm Solution Quality vs Time", xlabel = "Time in Seconds", ylabel = "||v - v⋆||∞", yscale = :log)
+p = plot(title = "Algorithm Solution Quality vs Time", xlabel = "Time in Seconds", ylabel = "||v - v⋆||∞", yscale = :log, size = (1200,800))
 
-for item ∈ eachrow(results)
+for big_item ∈ alg_results
+    sort!(big_item, :runtime)
+    item = big_item[400,:]
     if item.algorithm ∈ algorithms
         plot_err = copy(item.errors)
         plot_err[end] = 1e-3
         plot!(item.times,plot_err,label = item.algorithm)
     end
+
 end
 
 hline!([1e-3], linestyle = :dash, color = :red, label = "Tolerance")
