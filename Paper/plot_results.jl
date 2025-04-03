@@ -1,29 +1,89 @@
 using Plots, CSV, DataFrames, Statistics, Distributions, Arrow
 
+@recipe function f(::Type{Val{:samplemarkers}}, x, y, z; number = 10, maxlen = 1000)
+    n = sum(x .≤ maxlen)
+    step = Int(ceil(n/number))
+    sx, sy = x[[1:step:n;n]], y[[1:step:n;n]]
+    # add an empty series with the correct type for legend markers
+    @series begin
+        seriestype := :path
+        markershape --> :auto
+        x := []
+        y := []
+    end
+    # add a series for the line
+    @series begin
+        primary := false # no legend entry
+        markershape := :none # ensure no markers
+        seriestype := :path
+        seriescolor := get(plotattributes, :seriescolor, :auto)
+        x := x
+        y := y
+    end
+    # return  a series for the sampled markers
+    primary := false
+    seriestype := :scatter
+    markershape --> :auto
+    x := sx
+    y := sy
+end
 
-algorithms = ["VI", "PAI", "FT", "HK", "KB", "RCPI", "WIN", "PPI"]
-#linetypes = [:solid, :dash, :dot]
-#= algorithms = ["PAI", "KM"]
-legend_labels = ["PAI", "RCPI"] =#
 
-results = copy(DataFrame(Arrow.Table("Paper/new test data/inv_fast.arrow")))
+algorithms = ["RCPI","PAI","VI", "FT", "HK", #= "KB", =# "WIN", "PPI"]
+alg_marks = [:circle, :rect, :diamond, :hexagon, :cross, :dtriangle, :star5]
+alg_colors = Plots.palette(:auto)[1:7]
+alg_marks_dict = Dict(algorithms .=> alg_marks)
+alg_colors_dict = Dict(algorithms .=> alg_colors)
+
+results = copy(DataFrame(Arrow.Table("Paper/new test data/grid_all.arrow")))
 alg_results = groupby(results, :algorithm)
 
-p = plot(title = "Algorithm Solution Quality vs Time", xlabel = "Time in Seconds", ylabel = "||v - v⋆||∞", yscale = :log, size = (1200,800))
+p1 = plot(title = "Small Problems", yscale = :log, xlim = (0,60))
 
 for big_item ∈ alg_results
     sort!(big_item, :runtime)
     item = big_item[400,:]
     if item.algorithm ∈ algorithms
         plot_err = copy(item.errors)
-        plot_err[end] = 1e-3
-        plot!(item.times,plot_err,label = item.algorithm)
+        plot_time = copy(item.times)
+        if plot_err[end] < 1e-3
+            z = (plot_err[end]/plot_err[end-1])^(1/(plot_time[end]-plot_time[end-1]))
+            plot_time[end] = log(z,1e-3/plot_err[end-1]) + plot_time[end-1]
+            plot_err[end] = 1e-3
+        end
+        plot!(plot_time,plot_err,label = item.algorithm, seriescolor = alg_colors_dict[item.algorithm], markershape = alg_marks_dict[item.algorithm],markerstrokewidth = .5, legend = :topright, seriestype = :samplemarkers, number = 5, maxlen = 60)
     end
 
 end
 
 hline!([1e-3], linestyle = :dash, color = :red, label = "Tolerance")
 
+results = copy(DataFrame(Arrow.Table("Paper/new test data/grid_fast.arrow")))
+alg_results = groupby(results, :algorithm)
+
+p2 = plot(title = "Large Problems", yscale = :log)
+
+for big_item ∈ alg_results
+    sort!(big_item, :runtime)
+    item = big_item[400,:]
+    if item.algorithm ∈ algorithms
+        plot_err = copy(item.errors)
+        plot_time = copy(item.times)
+        if plot_err[end] < 1e-3
+            z = (plot_err[end]/plot_err[end-1])^(1/(plot_time[end]-plot_time[end-1]))
+            plot_time[end] = log(z,1e-3/plot_err[end-1]) + plot_time[end-1]
+            plot_err[end] = 1e-3
+        end
+        plot!(plot_time,plot_err,label = item.algorithm, seriescolor = alg_colors_dict[item.algorithm], markershape = alg_marks_dict[item.algorithm], markerstrokewidth = .5, seriestype = :samplemarkers, legend=false)
+    end
+
+end
+
+hline!([1e-3], linestyle = :dash, color = :red, label = "Tolerance")
+
+
+p = plot(p1,p2, layout= (1,2),plot_title = "Inventory Solution Quality vs Time", xlabel = "Time in Seconds", ylabel = "||Tv - v||∞", size = (1200,800),left_margin=5Plots.mm)
+print(colors_used)
 display(p)
 
 #= time_stats = combine(groupby(results, [:state_number,:algorithm,:γ]), :time => mean, nrow, :time => std)
