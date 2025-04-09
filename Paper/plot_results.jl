@@ -1,4 +1,4 @@
-using Plots, CSV, DataFrames, Statistics, Distributions, Arrow
+using Plots, CSV, DataFrames, Statistics, Distributions, Arrow, LaTeXStrings
 
 @recipe function f(::Type{Val{:samplemarkers}}, x, y, z; number = 10, maxlen = 1000)
     n = sum(x .≤ maxlen)
@@ -35,10 +35,30 @@ alg_colors = Plots.palette(:auto)[1:7]
 alg_marks_dict = Dict(algorithms .=> alg_marks)
 alg_colors_dict = Dict(algorithms .=> alg_colors)
 
-results = copy(DataFrame(Arrow.Table("Paper/new test data/grid_all.arrow")))
+results = copy(DataFrame(Arrow.Table("Paper/new test data/inv_fast.arrow")))
+results[results.runtime .≥ 1000, :runtime] .= Inf
+
+temp = combine(groupby(combine(groupby(results, [:inv_id, :γ, :state_number]), [:runtime, :algorithm] => (t,a) -> t.-t[a .== "KB"],
+                                                                                :algorithm => a->a), :algorithm_function), :runtime_algorithm_function => mean => :mean,
+                                                                                                                           :runtime_algorithm_function => minimum => :min, 
+                                                                                                                           :runtime_algorithm_function => (t -> quantile(t,.25)) => :lower_quartile,
+                                                                                                                           :runtime_algorithm_function => median => :median,
+                                                                                                                           :runtime_algorithm_function => (t -> quantile(t,.75)) => :upper_quartile, 
+                                                                                                                           :runtime_algorithm_function => maximum => :max)
+###################################################################################################################################################################################################################################################################
+
+#= pleg = plot(legend = :outertopright)
+for alg ∈ algorithms
+    plot!([1], label = alg, seriescolor = alg_colors_dict[alg], markershape = alg_marks_dict[alg],markerstrokewidth = .5)
+end
+plot!(foreground_color=:white, background_color=:white,
+      xaxis=false, yaxis=false, framestyle=:none) =#
+
+#= results = copy(DataFrame(Arrow.Table("Paper/new test data/inv_all.arrow")))
 alg_results = groupby(results, :algorithm)
 
-p1 = plot(title = "Small Problems", yscale = :log, xlim = (0,60))
+
+p1 = plot(yscale = :log, xlim = (0,25), xlabel = "Time (s)", ylabel = L"\Vert \mathfrak{T}v - v \; \Vert_\infty", size = (600,400))
 
 for big_item ∈ alg_results
     sort!(big_item, :runtime)
@@ -51,17 +71,17 @@ for big_item ∈ alg_results
             plot_time[end] = log(z,1e-3/plot_err[end-1]) + plot_time[end-1]
             plot_err[end] = 1e-3
         end
-        plot!(plot_time,plot_err,label = item.algorithm, seriescolor = alg_colors_dict[item.algorithm], markershape = alg_marks_dict[item.algorithm],markerstrokewidth = .5, legend = :topright, seriestype = :samplemarkers, number = 5, maxlen = 60)
+        plot!(plot_time,plot_err,label = item.algorithm, seriescolor = alg_colors_dict[item.algorithm], markershape = alg_marks_dict[item.algorithm],markerstrokewidth = .5, legend = :topright, seriestype = :samplemarkers, number = 5, maxlen = 25)
     end
 
 end
 
 hline!([1e-3], linestyle = :dash, color = :red, label = "Tolerance")
 
-results = copy(DataFrame(Arrow.Table("Paper/new test data/grid_fast.arrow")))
+results = copy(DataFrame(Arrow.Table("Paper/new test data/mg_fast.arrow")))
 alg_results = groupby(results, :algorithm)
 
-p2 = plot(title = "Large Problems", yscale = :log)
+p2 = plot(yscale = :log, xlabel = "Time (s)", ylabel = L"\Vert \mathfrak{T}v - v \; \Vert_\infty", size = (600,400))
 
 for big_item ∈ alg_results
     sort!(big_item, :runtime)
@@ -74,7 +94,7 @@ for big_item ∈ alg_results
             plot_time[end] = log(z,1e-3/plot_err[end-1]) + plot_time[end-1]
             plot_err[end] = 1e-3
         end
-        plot!(plot_time,plot_err,label = item.algorithm, seriescolor = alg_colors_dict[item.algorithm], markershape = alg_marks_dict[item.algorithm], markerstrokewidth = .5, seriestype = :samplemarkers, legend=false)
+        plot!(plot_time,plot_err,label = item.algorithm, seriescolor = alg_colors_dict[item.algorithm], markershape = alg_marks_dict[item.algorithm], markerstrokewidth = .5, seriestype = :samplemarkers)
     end
 
 end
@@ -82,9 +102,8 @@ end
 hline!([1e-3], linestyle = :dash, color = :red, label = "Tolerance")
 
 
-p = plot(p1,p2, layout= (1,2),plot_title = "Inventory Solution Quality vs Time", xlabel = "Time in Seconds", ylabel = "||Tv - v||∞", size = (1200,800),left_margin=5Plots.mm)
-print(colors_used)
-display(p)
+savefig(p1, "Paper/new test data/inv_all.pdf")
+savefig(p2, "Paper/new test data/mg_fast.pdf") =#
 
 #= time_stats = combine(groupby(results, [:state_number,:algorithm,:γ]), :time => mean, nrow, :time => std)
 
