@@ -35,10 +35,10 @@ alg_colors = Plots.palette(:auto)[1:7]
 alg_marks_dict = Dict(algorithms .=> alg_marks)
 alg_colors_dict = Dict(algorithms .=> alg_colors)
 
-results = copy(DataFrame(Arrow.Table("Paper/new test data/inv_fast.arrow")))
+results = copy(DataFrame(Arrow.Table("Paper/new test data/make_random_grid_fast.arrow")))
 results[results.runtime .≥ 1000, :runtime] .= Inf
 
-temp = combine(groupby(combine(groupby(results, [:inv_id, :γ, :state_number]), [:runtime, :algorithm] => (t,a) -> t.-t[a .== "KB"],
+temp = combine(groupby(combine(groupby(results, [:game_id, :γ, :state_number]), [:runtime, :algorithm] => (t,a) -> t.-t[a .== "RCPI"],
                                                                                 :algorithm => a->a), :algorithm_function), :runtime_algorithm_function => mean => :mean,
                                                                                                                            :runtime_algorithm_function => minimum => :min, 
                                                                                                                            :runtime_algorithm_function => (t -> quantile(t,.25)) => :lower_quartile,
@@ -46,7 +46,7 @@ temp = combine(groupby(combine(groupby(results, [:inv_id, :γ, :state_number]), 
                                                                                                                            :runtime_algorithm_function => (t -> quantile(t,.75)) => :upper_quartile, 
                                                                                                                            :runtime_algorithm_function => maximum => :max)
 ###################################################################################################################################################################################################################################################################
-
+show(temp, allrows = true)  
 #= pleg = plot(legend = :outertopright)
 for alg ∈ algorithms
     plot!([1], label = alg, seriescolor = alg_colors_dict[alg], markershape = alg_marks_dict[alg],markerstrokewidth = .5)
