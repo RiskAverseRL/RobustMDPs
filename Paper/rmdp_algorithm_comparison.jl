@@ -63,7 +63,7 @@ function time_algorithm(alg,model,γ,ξ,W,ϵ,env,max_time)
     elseif alg.name == "PPI"
         return PPI(model,γ,ξ,W,ϵ,env,max_time,alg.β,alg.ϵ₂)
     else error("algorithm name must be one of: \n
-                VI, PAI, HK, PPI, FT, M1, K1, KM, WIN")
+                VI, PAI, HK, PPI, FT, M1, KB, RCPI, WIN")
     end
 end
 
