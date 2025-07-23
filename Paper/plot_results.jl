@@ -43,16 +43,16 @@ end
 plot!(foreground_color=:white, background_color=:white,
       xaxis=false, yaxis=false, framestyle=:none) =#
 
-results = copy(DataFrame(Arrow.Table("Paper/new test data/inv_all.arrow")))
+results = copy(DataFrame(Arrow.Table("Paper/data/games_large.arrow")))
 alg_results = groupby(results, :algorithm)
 
-xmax = 20
+xmax = 5
 p = plot(yscale = :log, xlim = (0,xmax), xlabel = "Time (s)", ylabel = L"\psi_\infty(v)", size = (600,400))
 
 
-for big_item ∈ alg_results[5:6]
+for big_item ∈ alg_results[2:3]
     sort!(big_item, :runtime)
-    item = big_item[400,:]
+    item = big_item[300,:]
     if item.algorithm ∈ algorithms
         plot_err = copy(item.errors)
         plot_time = copy(item.times)
@@ -66,9 +66,9 @@ for big_item ∈ alg_results[5:6]
 
 end
 
-for big_item ∈ alg_results[vcat(1:4,7:8)]
+for big_item ∈ alg_results[vcat([1],4:5)]
     sort!(big_item, :runtime)
-    item = big_item[400,:]
+    item = big_item[300,:]
     if item.algorithm ∈ algorithms
         plot_err = copy(item.errors)
         plot_time = copy(item.times)

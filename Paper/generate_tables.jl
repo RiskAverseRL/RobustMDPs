@@ -1,11 +1,13 @@
 using Plots, CSV, DataFrames, Statistics, Distributions, Arrow, LaTeXStrings,Latexify
 
 
-results1 = copy(DataFrame(Arrow.Table("Paper/new test data/inv_all.arrow")))
-results2 = copy(DataFrame(Arrow.Table("Paper/new test data/inv_fast_table.arrow"))) 
+results1 = copy(DataFrame(Arrow.Table("Paper/data/games_large.arrow")))
+#results2 = copy(DataFrame(Arrow.Table("Paper/data/inv_fast_table.arrow"))) 
 #results[results.runtime .≥ 1000, :runtime] .= Inf
 
 standard_error(x) = std(x)/sqrt(length(x))
+
+
 
 
 temp1 = combine(groupby(combine(groupby(results1, [:inv_id, :γ, :state_number]), [:runtime, :algorithm] => (t,a) -> t./t[a .== "VI"],
